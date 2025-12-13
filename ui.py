@@ -168,4 +168,53 @@ def display_stock_list(stocks, page=1, page_size=20):
         )
     
     console.print(table)
-    console.print(f"[bold]操作提示[/bold]: [n] 下一页, [p] 上一页, [q] 返回菜单")
+    console.print(f"[bold]操作提示[/bold]: \[n] 下一页, \[p] 上一页, \[q] 返回菜单")
+
+def display_stock_list_page(stocks, page, total_pages, total_items):
+    """
+    Display a pre-sliced page of stock data.
+    """
+    table = Table(title=f"市场概览 (第 {page}/{total_pages} 页 - 共 {total_items} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("名称", style="magenta")
+    table.add_column("最新价", justify="right")
+    table.add_column("涨跌幅", justify="right")
+    table.add_column("成交量", justify="right")
+
+    for stock in stocks:
+        price = stock.get('price')
+        # Handle nan/dirty data
+        try:
+            price = float(price)
+            price_str = f"{price:.2f}"
+        except:
+            price_str = str(price)
+            
+        c_percent = stock.get('change_percent')
+        try:
+            c_percent = float(c_percent)
+            c_str = f"{c_percent:.2f}%"
+        except:
+            c_percent = 0.0
+            c_str = "-"
+
+        if c_percent > 0:
+            color = "green"
+            sign = "+"
+        elif c_percent < 0:
+            color = "red"
+            sign = ""
+        else:
+            color = "white"
+            sign = ""
+
+        table.add_row(
+            str(stock.get('symbol')),
+            str(stock.get('name')),
+            price_str,
+            f"[{color}]{sign}{c_str}[/{color}]",
+            str(stock.get('volume'))
+        )
+    
+    console.print(table)
+    console.print(f"[bold]操作提示[/bold]: \[n] 下一页, \[p] 上一页, \[q] 返回菜单")

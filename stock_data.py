@@ -1,298 +1,308 @@
 import akshare as ak
 import yfinance as yf
+import baostock as bs
 import pandas as pd
+import requests
+import io
+import datetime
+import contextlib
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Union
-from proxy_manager import ProxyManager
 import warnings
-import os
-import contextlib
 
 # Suppress pandas future warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 @contextlib.contextmanager
-def no_proxy_context():
-    """
-    Temporarily remove proxy from environment variables.
-    """
-    proxies = {}
-    keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
-    for k in keys:
-        if k in os.environ:
-            proxies[k] = os.environ.pop(k)
-    try:
-        yield
-    finally:
-        # Restore
-        os.environ.update(proxies)
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
 
 class StockDataProvider:
-    def __init__(self, use_proxy: bool = False):
-        self.proxy_manager = ProxyManager() if use_proxy else None
+    def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=10)
 
-    def _get_proxy(self) -> Optional[Dict]:
-        if self.proxy_manager:
-            return self.proxy_manager.get_proxy()
-        return None
+    def _get_yf_ticker(self, symbol: str, market: str) -> str:
+        """
+        Convert symbol to yfinance format.
+        CN: 600519 -> 600519.SS
+        US: BRK.B -> BRK-B
+        """
+        if market == "CN":
+            # If already has suffix, trust it
+            if symbol.endswith('.SS') or symbol.endswith('.SZ') or symbol.endswith('.BJ'):
+                return symbol
+                
+            if symbol.startswith('6') or symbol.startswith('9'):
+                return f"{symbol}.SS"
+            elif symbol.startswith('0') or symbol.startswith('3') or symbol.startswith('2'):
+                 return f"{symbol}.SZ"
+            elif symbol.startswith('8') or symbol.startswith('4'):
+                 return f"{symbol}.BJ"
+            return symbol
+        elif market == "US":
+            return symbol.replace('.', '-')
+        return symbol
 
     def get_price(self, symbol: str, market: str) -> Optional[Dict]:
         """
-        Get current price and change for a single stock.
+        Get current price for a single stock.
         """
         try:
-            if market == "US":
-                return self._get_us_stock_price(symbol)
-            elif market == "CN":
-                return self._get_cn_stock_price(symbol)
-            else:
-                print(f"Unknown market: {market}")
-                return None
+            yf_symbol = self._get_yf_ticker(symbol, market)
+
+            ticker = yf.Ticker(yf_symbol)
+            
+            # Fast info check
+            info = ticker.fast_info
+            price = info.last_price
+            prev_close = info.previous_close
+            
+            # Fallback to history if fast_info is missing (sometimes happens)
+            if price is None:
+                hist = ticker.history(period="1d")
+                if not hist.empty:
+                    price = hist['Close'].iloc[-1]
+                    prev_close = hist['Open'].iloc[0] # Approx
+            
+            change = 0
+            change_percent = 0
+            if price is not None and prev_close:
+                change = price - prev_close
+                if prev_close != 0:
+                    change_percent = (change / prev_close) * 100
+            
+            # Get Name? yfinance info is slow.
+            # For CN, getting English name from Yahoo is okay? Or use cached?
+            # We accept English name or whatever Yahoo gives.
+            name = ticker.info.get('shortName', symbol) if hasattr(ticker, 'info') else symbol
+
+            return {
+                "symbol": symbol,
+                "market": market,
+                "name": name,
+                "price": price if price else 0,
+                "change": change,
+                "change_percent": change_percent,
+                "volume": 0, # Optimization: skip volume if fast_info doesn't have it easily
+                "currency": "CNY" if market == "CN" else "USD"
+            }
         except Exception as e:
-            # print(f"Error fetching {symbol}: {e}") # Silent error for UI cleanliness, maybe log it
             return {
                  "symbol": symbol,
                  "market": market,
                  "error": str(e),
-                 "price": 0,
-                 "change": 0,
-                 "change_percent": 0
+                 "price": 0, "change": 0, "change_percent": 0
             }
-
-    def _get_us_stock_price(self, symbol: str) -> Dict:
-        """
-        Fetch US stock data using yfinance.
-        """
-        try:
-            ticker = yf.Ticker(symbol)
-            # yfinance info is sometimes slow or unreliable, use fast history if possible
-            # But we need Name.
-            info = ticker.info
-            current_price = info.get('currentPrice') or info.get('regularMarketPrice')
-            previous_close = info.get('previousClose') or info.get('regularMarketPreviousClose')
-            
-            if current_price is None:
-                 hist = ticker.history(period="1d")
-                 if not hist.empty:
-                     current_price = hist['Close'].iloc[-1]
-                     previous_close = hist['Open'].iloc[0]
-            
-            change = 0
-            change_percent = 0
-            if current_price is not None and previous_close:
-                change = current_price - previous_close
-                change_percent = (change / previous_close) * 100
-
-            return {
-                "symbol": symbol,
-                "market": "US",
-                "name": info.get('shortName', symbol),
-                "price": current_price if current_price else 0,
-                "change": change,
-                "change_percent": change_percent,
-                "volume": info.get('volume', 0),
-                "currency": info.get('currency', 'USD')
-            }
-        except Exception as e:
-            raise e
-
-    def _get_cn_stock_price(self, symbol: str) -> Dict:
-        """
-        Fetch CN stock data using akshare.
-        Symbol should be like '600519'.
-        """
-        try:
-            # optimized: stock_zh_a_spot_em() is slow (fetches all).
-            # If we are doing batch, we should fetch once and cache? 
-            # For now, let's assume we maintain a cached global dataframe if called frequently?
-            # Or just fetch for now.
-            # Ideally akshare has single stock spot. 'stock_individual_info_em' gives info but not real time price.
-            # 'stock_zh_a_hist_df' gives daily history.
-            # Let's try to get quote from a lighter API if possible.
-            # Actually stock_zh_a_spot_em is the main real-time one. 
-            # We will use it but we should be careful about rate limits if we call it per stock.
-            # BETTER STRATEGY: 
-            # If get_prices_batch is called, we fetch the whole table ONCE and filter.
-            # If get_price is called single, we also fetch whole table? That's heavy (5000 rows).
-            # SEARCH: check if there is a specific quote api.
-            # Found: stock_bid_ask_em might work for snapshots
-            
-            with no_proxy_context():
-                df = ak.stock_zh_a_spot_em()
-            stock_info = df[df['代码'] == symbol]
-            
-            if stock_info.empty:
-                return {
-                     "symbol": symbol,
-                     "market": "CN",
-                     "error": "Stock not found"
-                }
-            
-            row = stock_info.iloc[0]
-            price = row['最新价']
-            change_percent = row['涨跌幅']
-            change = row['涨跌额']
-            name = row['名称']
-            volume = row['成交量']
-            
-            return {
-                "symbol": symbol,
-                "market": "CN",
-                "name": name,
-                "price": price,
-                "change": change,
-                "change_percent": change_percent,
-                "volume": volume,
-                "currency": "CNY"
-            }
-        except Exception as e:
-            raise e
 
     def get_prices_batch(self, stocks: List[Dict[str, str]]) -> List[Dict]:
         """
-        Fetch prices for multiple stocks.
-        Optimization for CN: Fetch ALL A-shares once if there are many CN stocks requested.
+        Fetch prices for multiple stocks efficiently using yfinance batch.
         """
-        cn_stocks = [s['symbol'] for s in stocks if s['market'] == 'CN']
-        us_stocks = [s for s in stocks if s['market'] == 'US']
+        if not stocks:
+            return []
+
+        # Group by yfinance tickers
+        yf_map = {} # yf_symbol -> original stock dict
+        yf_tickers = []
         
+        for s in stocks:
+            # Use explicit yf_symbol if provided by get_market_tickers
+            if 'yf_symbol' in s:
+                yf_sym = s['yf_symbol']
+            else:
+                sym = s['symbol']
+                mkt = s['market']
+                yf_sym = self._get_yf_ticker(sym, mkt)
+            
+            yf_map[yf_sym] = s
+            yf_tickers.append(yf_sym)
+
         results = []
         
-        # Optimize CN fetching
-        if cn_stocks:
-            try:
-                # Fetch all CN stocks once
-                df_cn = ak.stock_zh_a_spot_em()
-                for symbol in cn_stocks:
-                    row = df_cn[df_cn['代码'] == symbol]
-                    if not row.empty:
-                        r = row.iloc[0]
+        try:
+            # yfinance batch fetch
+            # download is faster for many tickers than Tickers(list)
+            # Fetch 1 day of data
+            # group_by='ticker' returns MultiIndex (Price, Ticker)
+            with suppress_stdout(): # Silence yfinance noise
+                data = yf.download(yf_tickers, period="1d", group_by='ticker', threads=True, progress=False)
+            
+            is_multi = isinstance(data.columns, pd.MultiIndex)
+
+            for yf_sym in yf_tickers:
+                orig = yf_map[yf_sym]
+                try:
+                    df = None
+                    if is_multi:
+                        if yf_sym in data.columns:
+                             df = data[yf_sym]
+                    else:
+                        df = data
+
+                    if df is not None and not df.empty:
+                        price = df['Close'].iloc[-1]
+                        
+                        if pd.isna(price):
+                            results.append({**orig, "error": "No price data"})
+                            continue
+
+                        prev = df['Open'].iloc[0]
+                        change = price - prev
+                        cp = (change/prev)*100 if prev != 0 else 0
+                        
+                        vol = df['Volume'].iloc[-1] if 'Volume' in df.columns else 0
+                        
+                        # Handle NaN volume
+                        if pd.isna(vol): vol = 0
+
                         results.append({
-                            "symbol": symbol,
-                            "market": "CN",
-                            "name": r['名称'],
-                            "price": r['最新价'],
-                            "change": r['涨跌额'],
-                            "change_percent": r['涨跌幅'],
-                            "volume": r['成交量'],
-                            "currency": "CNY"
+                            "symbol": orig['symbol'],
+                            "market": orig['market'],
+                            "name": orig.get('name', orig['symbol']),
+                            "price": price,
+                            "change": change,
+                            "change_percent": cp,
+                            "volume": int(vol)
                         })
                     else:
-                        results.append({"symbol": symbol, "market": "CN", "error": "Not found"})
-            except Exception as e:
-                 # Fallback to individual or error
-                 for symbol in cn_stocks:
-                      results.append({"symbol": symbol, "market": "CN", "error": str(e)})
+                         results.append({**orig, "error": "No data returned"})
 
-        # Multi-thread US fetching
-        if us_stocks:
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_stock = {
-                    executor.submit(self.get_price, stock['symbol'], stock['market']): stock 
-                    for stock in us_stocks
-                }
-                for future in as_completed(future_to_stock):
-                    stock = future_to_stock[future]
-                    try:
-                        data = future.result()
-                        if data:
-                            results.append(data)
-                    except Exception as e:
-                        results.append({
-                            "symbol": stock['symbol'],
-                            "market": stock['market'],
-                            "error": str(e)
-                        })
-                        
+                except Exception as e:
+                     results.append({**orig, "error": f"Parse error: {str(e)}"})
+                     
+        except Exception as e:
+            # print(f"Batch fetch failed: {e}")
+            for s in stocks:
+                results.append(self.get_price(s['symbol'], s['market']))
+
         return results
 
     def get_history(self, symbol: str, market: str, period: str = "1mo") -> Optional[pd.DataFrame]:
         """
-        Fetch historical data.
+        Fetch historical data using yfinance for both.
         """
         try:
-            if market == "US":
-                ticker = yf.Ticker(symbol)
-                return ticker.history(period=period)
-            elif market == "CN":
-                import datetime
-                end_date = datetime.datetime.now()
-                # Map period to days roughly
-                days_map = {'1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, 'ytd': 365, 'max': 3650}
-                days = days_map.get(period, 30)
-                
-                start_date = end_date - datetime.timedelta(days=days)
-                start_str = start_date.strftime("%Y%m%d")
-                end_str = end_date.strftime("%Y%m%d")
-                
-                # akshare stock_zh_a_hist
-                with no_proxy_context():
-                    df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
-                if df.empty:
-                    return None
-                    
-                df = df.rename(columns={
-                    "日期": "Date",
-                    "开盘": "Open",
-                    "收盘": "Close",
-                    "最高": "High",
-                    "最低": "Low",
-                    "成交量": "Volume"
-                })
-                df['Date'] = pd.to_datetime(df['Date'])
-                df.set_index("Date", inplace=True)
-                return df
+            yf_symbol = self._get_yf_ticker(symbol, market)
+            
+            ticker = yf.Ticker(yf_symbol)
+            df = ticker.history(period=period)
+            
+            if df.empty:
+                return None
+            
+            df = df.reset_index()
+            df = df.rename(columns={"Date": "Date", "Open": "Open", "Close": "Close", "High": "High", "Low": "Low", "Volume": "Volume"})
+            df.set_index("Date", inplace=True)
+            return df
         except Exception as e:
             print(f"Error fetching history: {e}")
             return None
-        return None
 
-    def get_stock_list(self, market: str) -> List[Dict]:
+    def get_market_tickers(self, market: str) -> List[Dict]:
         """
-        Fetch the full list of stocks for the given market.
-        Returns a customized list of dicts.
+        Fetch ONLY the list of tickers (symbol + name) for the market.
+        Prices will be 0/None.
         """
+        tickers = []
         try:
             if market == "CN":
-                with no_proxy_context():
-                    # stock_zh_a_spot_em returns a dataframe of all A-shares
-                    df = ak.stock_zh_a_spot_em()
-                # Rename columns matches for UI
-                # Need: symbol, name, price, change, change_percent, volume
-                # akshare columns: 序号, 代码, 名称, 最新价, 涨跌幅, 涨跌额, 成交量, 成交额, ...
+                with suppress_stdout():
+                    lg = bs.login()
                 
-                needed = df[['代码', '名称', '最新价', '涨跌幅', '成交量']].copy()
-                needed.columns = ['symbol', 'name', 'price', 'change_percent', 'volume']
-                
-                # Convert to records
-                return needed.to_dict('records')
-            
-            elif market == "US":
-                # stock_us_spot_em() -> might fail or differ by version
-                try:
-                    df = ak.stock_us_spot_em()
-                except AttributeError:
+                if lg.error_code != '0':
                     return []
                 
-                # Check columns. usually: 名称, 最新价, 涨跌幅, 代码 ...
-                rename_map = {
-                    '名称': 'name', '最新价': 'price', '涨跌幅': 'change_percent', '代码': 'symbol', '成交量': 'volume'
-                }
+                # Query recent trading days
+                target_date = datetime.datetime.now()
+                found_data = False
                 
-                # Filter available columns
-                available = [c for c in rename_map.keys() if c in df.columns]
-                needed = df[available].copy()
-                needed.rename(columns=rename_map, inplace=True)
+                for i in range(10): 
+                    query_date = (target_date - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+                    with suppress_stdout():
+                        rs = bs.query_all_stock(day=query_date)
+                    
+                    if rs.error_code != '0':
+                        continue
+                        
+                    current_day_tickers = []
+                    while rs.next():
+                         row = rs.get_row_data()
+                         current_day_tickers.append(row)
+                    
+                    if current_day_tickers:
+                        for row in current_day_tickers:
+                            # row: [code, tradeStatus, code_name]
+                            raw_code = row[0] # sh.600519
+                            name = row[2]
+                            
+                            yf_suffix = ""
+                            clean_code = raw_code
+                            
+                            if '.' in raw_code:
+                                parts = raw_code.split('.')
+                                exchange = parts[0]
+                                clean_code = parts[1]
+                                
+                                if exchange == 'sh':
+                                    yf_suffix = ".SS"
+                                elif exchange == 'sz':
+                                    yf_suffix = ".SZ"
+                                elif exchange == 'bj':
+                                    yf_suffix = ".BJ"
+                            else:
+                                # Fallback logic
+                                pass # clean_code already set
+                            
+                            # Construct exact yf_symbol
+                            yf_symbol = clean_code + yf_suffix
+                            
+                            tickers.append({
+                                "symbol": clean_code,
+                                "name": name,
+                                "market": "CN",
+                                "yf_symbol": yf_symbol, # Explicit mapping
+                                "price": 0, "change_percent": 0
+                            })
+                        found_data = True
+                        break 
                 
-                # Fill missing
-                for k in ['symbol', 'name', 'price', 'change_percent', 'volume']:
-                    if k not in needed.columns:
-                        needed[k] = 0 if k in ['price', 'change_percent', 'volume'] else "?"
+                with suppress_stdout():
+                    bs.logout()
                 
-                return needed.to_dict('records')
-
+            elif market == "US":
+                # Use Wikipedia for S&P 500
+                with suppress_stdout():
+                    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    r = requests.get(url, headers=headers)
+                    tables = pd.read_html(io.StringIO(r.text))
+                    df = tables[0]
+                
+                for _, row in df.iterrows():
+                    sym = row['Symbol']
+                    # S&P 500 list uses dot, yfinance uses dash
+                    yf_sym = sym.replace('.', '-')
+                    
+                    tickers.append({
+                        "symbol": sym,
+                        "name": row['Security'],
+                        "market": "US",
+                        "yf_symbol": yf_sym,
+                        "price": 0, "change_percent": 0
+                    })
+                    
         except Exception as e:
-            # print(f"Error fetching stock list: {e}") 
+            print(f"Error fetching ticker list: {e}")
+            import traceback
+            traceback.print_exc()
             return []
-        return []
+            
+        return tickers

@@ -16,9 +16,8 @@ def main():
     # Initialize components
     watchlist_mgr = WatchlistManager()
     
-    # Check if PROXIES is set, if so enable proxy
-    use_proxy = os.getenv("PROXIES") is not None
-    stock_provider = StockDataProvider(use_proxy=use_proxy)
+    # Initialize provider (uses system proxy if configured in env)
+    stock_provider = StockDataProvider()
     
     summarizer = MarketSummarizer()
 
@@ -42,7 +41,7 @@ def main():
         elif choice == '2':
             # Add Stock
             symbol = get_user_input("请输入股票代码 (例如 AAPL 或 600519): ")
-            market = get_user_input("请输入市场 (US 或 CN): ").upper()
+            market = get_user_input("请输入市场 (US 或 CN)").upper()
             if market not in ['US', 'CN']:
                 console.print("[red]无效的市场。请输入 US 或 CN。[/red]")
             else:
@@ -60,7 +59,7 @@ def main():
         elif choice == '4':
             # Detail
             symbol = get_user_input("请输入股票代码: ")
-            market = get_user_input("请输入市场 (US 或 CN): ").upper()
+            market = get_user_input("请输入市场 (US 或 CN)").upper()
             
             with console.status(f"[bold green]正在获取 {symbol} 详情...[/bold green]"):
                 price_data = stock_provider.get_price(symbol, market)
@@ -88,44 +87,54 @@ def main():
 
         elif choice == '6':
             # Stock List & Pagination
-            market = get_user_input("请输入市场 (US 或 CN): ").upper()
-            if market not in ['US', 'CN']:
-                console.print("[red]无效的市场。请输入 US 或 CN。[/red]")
-                time.sleep(1)
+            while True:
+                market = get_user_input("请输入市场 (US 或 CN)").upper()
+                if market in ['US', 'CN', 'Q']:
+                    break
+                console.print("[red]无效的市场。请输入 US 或 CN (输入 Q 返回)。[/red]")
+            
+            if market == 'Q':
                 continue
 
-            with console.status(f"[bold green]正在加载 {market} 市场列表...[/bold green]"):
-                full_list = stock_provider.get_stock_list(market)
+            with console.status(f"[bold green]正在加载 {market} 市场代码列表...[/bold green]"):
+                all_tickers = stock_provider.get_market_tickers(market)
             
-            if not full_list:
-                console.print("[red]列表为空或加载失败。[/red]")
-                get_user_input("\n按回车键返回...")
-                continue
-                
+            if not all_tickers:
+                 console.print(f"[red]无法获取 {market} 市场列表或列表为空。[/red]")
+                 get_user_input("\n按回车键返回...")
+                 continue
+
             page = 1
             page_size = 20
             
-            from ui import display_stock_list # Local import to ensure it picks up new function if module reload issues
+            from ui import display_stock_list 
             
             while True:
                 clear_screen()
-                display_stock_list(full_list, page, page_size)
+                # Pagination Logic: Slice first, then fetch prices
+                total_pages = (len(all_tickers) + page_size - 1) // page_size
+                start = (page - 1) * page_size
+                end = start + page_size
+                page_tickers = all_tickers[start:end]
                 
-                nav = get_user_input("请输入指令: ").lower()
+                with console.status(f"[bold blue]正在获取第 {page}/{total_pages} 页行情...[/bold blue]"):
+                    page_data = stock_provider.get_prices_batch(page_tickers)
+                
+                # Display the page
+                from ui import display_stock_list_page
+                display_stock_list_page(page_data, page, total_pages, len(all_tickers))
+                
+                nav = get_user_input("请输入指令").lower()
                 
                 if nav == 'n':
-                    # Next
-                    total_pages = (len(full_list) + page_size - 1) // page_size
                     if page < total_pages:
                         page += 1
                 elif nav == 'p':
-                    # Prev
                     if page > 1:
                         page -= 1
                 elif nav == 'q':
                     break
                 else:
-                    # Refresh or check if user entered page number? For now just refresh
                     pass
 
         elif choice.lower() == 'q':
