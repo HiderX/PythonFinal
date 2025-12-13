@@ -86,6 +86,48 @@ def main():
                 display_summary(summary)
             get_user_input("\n按回车键返回...")
 
+        elif choice == '6':
+            # Stock List & Pagination
+            market = get_user_input("请输入市场 (US 或 CN): ").upper()
+            if market not in ['US', 'CN']:
+                console.print("[red]无效的市场。请输入 US 或 CN。[/red]")
+                time.sleep(1)
+                continue
+
+            with console.status(f"[bold green]正在加载 {market} 市场列表...[/bold green]"):
+                full_list = stock_provider.get_stock_list(market)
+            
+            if not full_list:
+                console.print("[red]列表为空或加载失败。[/red]")
+                get_user_input("\n按回车键返回...")
+                continue
+                
+            page = 1
+            page_size = 20
+            
+            from ui import display_stock_list # Local import to ensure it picks up new function if module reload issues
+            
+            while True:
+                clear_screen()
+                display_stock_list(full_list, page, page_size)
+                
+                nav = get_user_input("请输入指令: ").lower()
+                
+                if nav == 'n':
+                    # Next
+                    total_pages = (len(full_list) + page_size - 1) // page_size
+                    if page < total_pages:
+                        page += 1
+                elif nav == 'p':
+                    # Prev
+                    if page > 1:
+                        page -= 1
+                elif nav == 'q':
+                    break
+                else:
+                    # Refresh or check if user entered page number? For now just refresh
+                    pass
+
         elif choice.lower() == 'q':
             console.print("再见！")
             break

@@ -20,6 +20,7 @@ def display_menu():
         "[3] 删除自选股 (Remove Stock)\n"
         "[4] 查看个股详情 (Stock Detail)\n"
         "[5] 生成今日行情总结 (AI Summary)\n"
+        "[6] 查看市场列表 (Market Overview)\n"
         "\[q] 退出 (Quit)",
         title="股票行情追踪器 (Stock Tracker)",
         border_style="bold blue"
@@ -117,3 +118,54 @@ def display_summary(text):
 
 def get_user_input(prompt_text):
     return Prompt.ask(prompt_text)
+
+def display_stock_list(stocks, page=1, page_size=20):
+    total = len(stocks)
+    start = (page - 1) * page_size
+    end = start + page_size
+    current_page_stocks = stocks[start:end]
+    
+    total_pages = (total + page_size - 1) // page_size
+    
+    table = Table(title=f"市场概览 (第 {page}/{total_pages} 页 - 共 {total} 只)")
+    table.add_column("代码", style="cyan")
+    table.add_column("名称", style="magenta")
+    table.add_column("最新价", justify="right")
+    table.add_column("涨跌幅", justify="right")
+    table.add_column("成交量", justify="right")
+
+    for stock in current_page_stocks:
+        price = stock.get('price')
+        # Handle nan/dirty data
+        try:
+            price = float(price)
+            price_str = f"{price:.2f}"
+        except:
+            price_str = str(price)
+            
+        c_percent = stock.get('change_percent')
+        try:
+            c_percent = float(c_percent)
+        except:
+            c_percent = 0.0
+
+        if c_percent > 0:
+            color = "green"
+            sign = "+"
+        elif c_percent < 0:
+            color = "red"
+            sign = ""
+        else:
+            color = "white"
+            sign = ""
+
+        table.add_row(
+            str(stock.get('symbol')),
+            str(stock.get('name')),
+            price_str,
+            f"[{color}]{sign}{c_percent:.2f}%[/{color}]",
+            str(stock.get('volume'))
+        )
+    
+    console.print(table)
+    console.print(f"[bold]操作提示[/bold]: [n] 下一页, [p] 上一页, [q] 返回菜单")

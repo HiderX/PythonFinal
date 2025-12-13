@@ -5,9 +5,27 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Union
 from proxy_manager import ProxyManager
 import warnings
+import os
+import contextlib
 
 # Suppress pandas future warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+@contextlib.contextmanager
+def no_proxy_context():
+    """
+    Temporarily remove proxy from environment variables.
+    """
+    proxies = {}
+    keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
+    for k in keys:
+        if k in os.environ:
+            proxies[k] = os.environ.pop(k)
+    try:
+        yield
+    finally:
+        # Restore
+        os.environ.update(proxies)
 
 class StockDataProvider:
     def __init__(self, use_proxy: bool = False):
@@ -100,7 +118,8 @@ class StockDataProvider:
             # SEARCH: check if there is a specific quote api.
             # Found: stock_bid_ask_em might work for snapshots
             
-            df = ak.stock_zh_a_spot_em()
+            with no_proxy_context():
+                df = ak.stock_zh_a_spot_em()
             stock_info = df[df['代码'] == symbol]
             
             if stock_info.empty:
@@ -208,7 +227,8 @@ class StockDataProvider:
                 end_str = end_date.strftime("%Y%m%d")
                 
                 # akshare stock_zh_a_hist
-                df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
+                with no_proxy_context():
+                    df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
                 if df.empty:
                     return None
                     
@@ -227,3 +247,52 @@ class StockDataProvider:
             print(f"Error fetching history: {e}")
             return None
         return None
+
+    def get_stock_list(self, market: str) -> List[Dict]:
+        """
+        Fetch the full list of stocks for the given market.
+        Returns a customized list of dicts.
+        """
+        try:
+            if market == "CN":
+                with no_proxy_context():
+                    # stock_zh_a_spot_em returns a dataframe of all A-shares
+                    df = ak.stock_zh_a_spot_em()
+                # Rename columns matches for UI
+                # Need: symbol, name, price, change, change_percent, volume
+                # akshare columns: 序号, 代码, 名称, 最新价, 涨跌幅, 涨跌额, 成交量, 成交额, ...
+                
+                needed = df[['代码', '名称', '最新价', '涨跌幅', '成交量']].copy()
+                needed.columns = ['symbol', 'name', 'price', 'change_percent', 'volume']
+                
+                # Convert to records
+                return needed.to_dict('records')
+            
+            elif market == "US":
+                # stock_us_spot_em() -> might fail or differ by version
+                try:
+                    df = ak.stock_us_spot_em()
+                except AttributeError:
+                    return []
+                
+                # Check columns. usually: 名称, 最新价, 涨跌幅, 代码 ...
+                rename_map = {
+                    '名称': 'name', '最新价': 'price', '涨跌幅': 'change_percent', '代码': 'symbol', '成交量': 'volume'
+                }
+                
+                # Filter available columns
+                available = [c for c in rename_map.keys() if c in df.columns]
+                needed = df[available].copy()
+                needed.rename(columns=rename_map, inplace=True)
+                
+                # Fill missing
+                for k in ['symbol', 'name', 'price', 'change_percent', 'volume']:
+                    if k not in needed.columns:
+                        needed[k] = 0 if k in ['price', 'change_percent', 'volume'] else "?"
+                
+                return needed.to_dict('records')
+
+        except Exception as e:
+            # print(f"Error fetching stock list: {e}") 
+            return []
+        return []
