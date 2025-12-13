@@ -1,0 +1,7 @@
+akshare
+yfinance
+openai
+rich
+python-dotenv
+pandas
+requests
