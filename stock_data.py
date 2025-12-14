@@ -28,6 +28,7 @@ def suppress_stdout():
 class StockDataProvider:
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=10)
+        self.ticker_cache = {"CN": [], "US": []}
 
     def _get_yf_ticker(self, symbol: str, market: str) -> str:
         """
@@ -50,6 +51,41 @@ class StockDataProvider:
         elif market == "US":
             return symbol.replace('.', '-')
         return symbol
+    
+    def _ensure_cache(self):
+        """
+        Populate cache if empty. 
+        """
+        if not self.ticker_cache["CN"]:
+            # print("Caching CN tickers...") # Let UI handle status
+            self.ticker_cache["CN"] = self.get_market_tickers("CN")
+            
+        if not self.ticker_cache["US"]:
+            # print("Caching US tickers...")
+            self.ticker_cache["US"] = self.get_market_tickers("US")
+
+    def search_stocks(self, keyword: str) -> List[Dict]:
+        """
+        Search for stocks by symbol or name across all cached markets.
+        Case insensitive.
+        """
+        self._ensure_cache()
+        
+        kw = keyword.lower()
+        matches = []
+        
+        # Search CN
+        for t in self.ticker_cache["CN"]:
+            if kw in t['symbol'].lower() or kw in t['name'].lower():
+                matches.append(t)
+                
+        # Search US
+        for t in self.ticker_cache["US"]:
+             if kw in t['symbol'].lower() or kw in t['name'].lower():
+                matches.append(t)
+        
+        # Limit to 20 results for UX
+        return matches[:20]
 
     def get_price(self, symbol: str, market: str) -> Optional[Dict]:
         """

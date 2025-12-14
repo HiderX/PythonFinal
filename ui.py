@@ -217,4 +217,28 @@ def display_stock_list_page(stocks, page, total_pages, total_items):
         )
     
     console.print(table)
-    console.print(f"[bold]操作提示[/bold]: \[n] 下一页, \[p] 上一页, \[q] 返回菜单")
+    console.print(f"[bold]操作提示[/bold]: \[n] 下一页, \[p] 上一页, \[j] 跳转页码, \[q] 返回菜单")
+
+def display_search_results(results):
+    """
+    Display search results for selection.
+    """
+    if not results:
+        console.print("[yellow]未找到匹配的股票。[/yellow]")
+        return
+
+    table = Table(title=f"搜索结果 (共 {len(results)} 条)")
+    table.add_column("序号", justify="right", style="cyan")
+    table.add_column("代码", style="bold")
+    table.add_column("名称", style="magenta")
+    table.add_column("市场", style="white")
+
+    for i, stock in enumerate(results):
+        table.add_row(
+            str(i + 1),
+            stock['symbol'],
+            stock['name'],
+            stock['market']
+        )
+    
+    console.print(table)

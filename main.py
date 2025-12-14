@@ -39,26 +39,61 @@ def main():
             get_user_input("\n按回车键返回...")
 
         elif choice == '2':
-            # Add Stock
-            symbol = get_user_input("请输入股票代码 (例如 AAPL 或 600519): ")
-            market = get_user_input("请输入市场 (US 或 CN)").upper()
-            if market not in ['US', 'CN']:
-                console.print("[red]无效的市场。请输入 US 或 CN。[/red]")
+            # Add Stock with Fuzzy Search
+            from ui import display_search_results
+            
+            keyword = get_user_input("请输入股票名称或代码 (直接添加请按 D)").strip()
+            
+            if keyword.upper() == 'D':
+                # Direct Entry Mode
+                symbol = get_user_input("请输入股票代码 (例如 AAPL 或 600519)")
+                market = get_user_input("请输入市场 (US 或 CN)").upper()
+                if market not in ['US', 'CN']:
+                    console.print("[red]无效的市场。[/red]")
+                else:
+                    watchlist_mgr.add_stock(symbol, market)
+                    console.print(f"[green]已添加 {symbol} 到自选股。[/green]")
             else:
-                watchlist_mgr.add_stock(symbol, market)
-                console.print(f"[green]已添加 {symbol} 到自选股。[/green]")
+                # Search Mode
+                with console.status(f"[bold green]正在搜索 '{keyword}'... (首次搜索可能较慢)[/bold green]"):
+                    matches = stock_provider.search_stocks(keyword)
+                
+                if matches:
+                    display_search_results(matches)
+                    idx_str = get_user_input("请输入序号进行添加 (或输入 0 取消)")
+                    if idx_str.isdigit():
+                        idx = int(idx_str)
+                        if 1 <= idx <= len(matches):
+                            selected = matches[idx-1]
+                            watchlist_mgr.add_stock(selected['symbol'], selected['market'])
+                            console.print(f"[green]已添加 {selected['name']} ({selected['symbol']}) 到自选股。[/green]")
+                        elif idx == 0:
+                            console.print("[yellow]已取消。[/yellow]")
+                        else:
+                             console.print("[red]无效的序号。[/red]")
+                    else:
+                        console.print("[red]无效的输入。[/red]")
+                else:
+                    console.print("[red]未找到相关股票。[/red]")
+                    if get_user_input("是否尝试直接添加代码? (y/n)").lower() == 'y':  # Fixed colon here
+                        symbol = get_user_input("请输入股票代码")
+                        market = get_user_input("请输入市场 (US 或 CN)").upper()
+                        if market in ['US', 'CN']:
+                             watchlist_mgr.add_stock(symbol, market)
+                             console.print(f"[green]已添加 {symbol} 到自选股。[/green]")
+
             get_user_input("\n按回车键返回...")
 
         elif choice == '3':
             # Remove Stock
-            symbol = get_user_input("请输入要删除的股票代码: ")
+            symbol = get_user_input("请输入要删除的股票代码")
             watchlist_mgr.remove_stock(symbol)
             console.print(f"[green]已从自选股删除 {symbol}。[/green]")
             get_user_input("\n按回车键返回...")
 
         elif choice == '4':
             # Detail
-            symbol = get_user_input("请输入股票代码: ")
+            symbol = get_user_input("请输入股票代码")
             market = get_user_input("请输入市场 (US 或 CN)").upper()
             
             with console.status(f"[bold green]正在获取 {symbol} 详情...[/bold green]"):
@@ -132,6 +167,18 @@ def main():
                 elif nav == 'p':
                     if page > 1:
                         page -= 1
+                elif nav == 'j':
+                    target = get_user_input(f"请输入跳转页码 (1-{total_pages})")
+                    if target.isdigit():
+                        p = int(target)
+                        if 1 <= p <= total_pages:
+                            page = p
+                        else:
+                            console.print(f"[red]页码超出范围 (1-{total_pages})[/red]")
+                            time.sleep(1)
+                    else:
+                         console.print("[red]无效的页码[/red]")
+                         time.sleep(1)
                 elif nav == 'q':
                     break
                 else:
