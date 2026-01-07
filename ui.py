@@ -19,8 +19,9 @@ def display_menu():
         "[2] 添加自选股 (Add Stock)\n"
         "[3] 删除自选股 (Remove Stock)\n"
         "[4] 查看个股详情 (Stock Detail)\n"
-        "[5] 生成今日行情总结 (AI Summary)\n"
+        "[5] 生成自选股今日行情总结 (Watchlist Stock AI Summary)\n"
         "[6] 查看市场列表 (Market Overview)\n"
+        "[7] 整体市场行情分析 (Market Analysis)\n"
         "\[q] 退出 (Quit)",
         title="股票行情追踪器 (Stock Tracker)",
         border_style="bold blue"
@@ -242,3 +243,41 @@ def display_search_results(results):
         )
     
     console.print(table)
+
+def display_market_analysis(indices_data, summary_text):
+    """
+    Display market indices table and AI summary.
+    """
+    table = Table(title="全球主要市场指数")
+    table.add_column("指数名称", style="magenta")
+    table.add_column("市场", style="cyan")
+    table.add_column("最新点位", justify="right")
+    table.add_column("涨跌幅", justify="right")
+    
+    for item in indices_data:
+        if "error" in item:
+            table.add_row(item['name'], item['market'], "Error", "-", style="red")
+            continue
+            
+        c_percent = item.get('change_percent', 0)
+        
+        if c_percent > 0:
+            color = "green"
+            sign = "+"
+        elif c_percent < 0:
+            color = "red"
+            sign = ""
+        else:
+            color = "white"
+            sign = ""
+            
+        table.add_row(
+            item['name'],
+            item['market'],
+            f"{item['price']:.2f}",
+            f"[{color}]{sign}{c_percent:.2f}%[/{color}]"
+        )
+        
+    console.print(table)
+    console.print("\n")
+    console.print(Panel(summary_text, title="AI 市场行情综述", border_style="bold yellow", width=100))
