@@ -348,4 +348,25 @@ class StockDataProvider:
             traceback.print_exc()
             return []
             
-        return tickers
+
+    def get_market_indices(self) -> List[Dict]:
+        """
+        Fetch data for major market indices.
+        CN: 上证指数, 深证成指, 创业板指
+        US: S&P 500, Dow Jones, NASDAQ
+        """
+        # Hardcoded indices
+        # Note: yfinance symbols for indices usually start with ^
+        indices = [
+            # CN Indices (Using 000001.SS for SH Comp, 399001.SZ for SZ Comp, 399006.SZ for ChiNext)
+            {"symbol": "000001.SS", "name": "上证指数", "market": "CN", "yf_symbol": "000001.SS"},
+            {"symbol": "399001.SZ", "name": "深证成指", "market": "CN", "yf_symbol": "399001.SZ"},
+            {"symbol": "399006.SZ", "name": "创业板指", "market": "CN", "yf_symbol": "399006.SZ"},
+             # US Indices
+            {"symbol": "^GSPC", "name": "标普500", "market": "US", "yf_symbol": "^GSPC"},
+            {"symbol": "^DJI", "name": "道琼斯", "market": "US", "yf_symbol": "^DJI"},
+            {"symbol": "^IXIC", "name": "纳斯达克", "market": "US", "yf_symbol": "^IXIC"},
+        ]
+        
+        return self.get_prices_batch(indices)
+

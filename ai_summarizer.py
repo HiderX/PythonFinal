@@ -59,3 +59,40 @@ class MarketSummarizer:
             return response.choices[0].message.content.strip()
         except Exception as e:
             return f"生成总结时出错: {e}"
+
+    def summarize_overall_market(self, indices_data: List[Dict]) -> str:
+        """
+        Generates a summary of the overall market status based on major indices.
+        """
+        if not self.client:
+            return "无法生成市场总结：未配置 OpenAI API Key。"
+
+        if not indices_data:
+            return "没有市场指数数据可供总结。"
+
+        data_str = "\n".join([
+             f"{item['name']}({item['market']}): 现价 {item.get('price', 0):.2f}, 涨跌幅 {item.get('change_percent', 0):.2f}%"
+             for item in indices_data if "error" not in item
+        ])
+        
+        prompt = f"""
+        请根据以下主要市场指数的今日行情，用中文写一段简短的全球/区域股市行情综述。
+        请分别点评中国市场（A股）和美国市场的表现。
+        
+        指数数据：
+        {data_str}
+        """
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是一个专业的金融市场分析师。请用简练的语言进行点评，无需罗列所有数据，着重分析趋势。"},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=600,
+                temperature=0.7
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            return f"生成市场总结时出错: {e}"

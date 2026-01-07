@@ -138,6 +138,8 @@ def main():
                  console.print(f"[red]无法获取 {market} 市场列表或列表为空。[/red]")
                  get_user_input("\n按回车键返回...")
                  continue
+                 
+
 
             page = 1
             page_size = 20
@@ -183,6 +185,19 @@ def main():
                     break
                 else:
                     pass
+
+                    pass
+
+        elif choice == '7':
+            # Market Analysis (Overall)
+            from ui import display_market_analysis
+            
+            with console.status("[bold green]正在获取主要指数数据并生成市场综述...[/bold green]"):
+                indices_data = stock_provider.get_market_indices()
+                summary = summarizer.summarize_overall_market(indices_data)
+                
+            display_market_analysis(indices_data, summary)
+            get_user_input("\n按回车键返回...")
 
         elif choice.lower() == 'q':
             console.print("再见！")
