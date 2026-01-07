@@ -184,6 +184,13 @@ class StockDataProvider:
                         df = data
 
                     if df is not None and not df.empty:
+                        # Drop rows where Close is NaN (e.g. current day before market open)
+                        df = df.dropna(subset=['Close'])
+                        
+                        if df.empty:
+                             results.append({**orig, "error": "No price data"})
+                             continue
+                             
                         price = df['Close'].iloc[-1]
                         
                         if pd.isna(price):
