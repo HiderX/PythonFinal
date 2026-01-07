@@ -100,8 +100,12 @@ def main():
                 price_data = stock_provider.get_price(symbol, market)
                 
                 if price_data and "error" not in price_data:
-                    history = stock_provider.get_history(symbol, market, period="1mo")
-                    display_stock_detail(price_data, history)
+                    # Check if actually found (price checking)
+                    if price_data.get('price', 0) == 0:
+                        console.print(f"[yellow]未找到股票 {symbol} 或该股票暂无数据。[/yellow]")
+                    else:
+                        history = stock_provider.get_history(symbol, market, period="1mo")
+                        display_stock_detail(price_data, history)
                 else:
                     err = price_data.get('error') if price_data else "Unknown error"
                     console.print(f"[red]获取数据失败: {err}[/red]")
@@ -123,7 +127,7 @@ def main():
         elif choice == '6':
             # Stock List & Pagination
             while True:
-                market = get_user_input("请输入市场 (US 或 CN)").upper()
+                market = get_user_input("请输入市场 (US 或 CN)，输入 Q 返回。").upper()
                 if market in ['US', 'CN', 'Q']:
                     break
                 console.print("[red]无效的市场。请输入 US 或 CN (输入 Q 返回)。[/red]")
@@ -138,8 +142,6 @@ def main():
                  console.print(f"[red]无法获取 {market} 市场列表或列表为空。[/red]")
                  get_user_input("\n按回车键返回...")
                  continue
-                 
-
 
             page = 1
             page_size = 20
@@ -191,10 +193,27 @@ def main():
         elif choice == '7':
             # Market Analysis (Overall)
             from ui import display_market_analysis
+            from datetime import datetime
             
-            with console.status("[bold green]正在获取主要指数数据并生成市场综述...[/bold green]"):
-                indices_data = stock_provider.get_market_indices()
-                summary = summarizer.summarize_overall_market(indices_data)
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            
+            # 1. Check DB cache
+            summary = stock_provider.db.get_market_summary(today_str)
+            indices_data = [] # We might need to fetch indices anyway for the table
+            
+            if summary:
+                 # If cached summary exists, just fetch indices for display (fast if cached)
+                 with console.status("[bold green]正在获取主要指数数据...[/bold green]"):
+                     indices_data = stock_provider.get_market_indices()
+            else:
+                # 2. If not cached, generate new
+                with console.status("[bold green]正在获取数据并生成 AI 市场综述 (这可能需要几秒钟)...[/bold green]"):
+                    indices_data = stock_provider.get_market_indices()
+                    summary = summarizer.summarize_overall_market(indices_data)
+                    
+                    # Save to DB
+                    if "出错" not in summary:
+                        stock_provider.db.save_market_summary(today_str, summary)
                 
             display_market_analysis(indices_data, summary)
             get_user_input("\n按回车键返回...")

@@ -19,7 +19,7 @@ def display_menu():
         "[2] 添加自选股 (Add Stock)\n"
         "[3] 删除自选股 (Remove Stock)\n"
         "[4] 查看个股详情 (Stock Detail)\n"
-        "[5] 生成今日行情总结 (AI Summary)\n"
+        "[5] 生成自选股今日行情总结 (Watchlist Stock AI Summary)\n"
         "[6] 查看市场列表 (Market Overview)\n"
         "[7] 整体市场行情分析 (Market Analysis)\n"
         "\[q] 退出 (Quit)",

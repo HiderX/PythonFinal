@@ -87,7 +87,7 @@ class MarketSummarizer:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的金融市场分析师。请用简练的语言进行点评，无需罗列所有数据，着重分析趋势。"},
+                    {"role": "system", "content": "在回答中使用纯文本，而不是使用markdown。你是一个专业的金融市场分析师。请用简练的语言进行点评，无需罗列所有数据，着重分析趋势。"},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=600,
