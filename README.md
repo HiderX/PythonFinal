@@ -40,7 +40,7 @@
 
 ## 环境要求
 - Python 3.8+
-- 依赖库: `rich`, `yfinance`, `akshare`, `openai`, `pandas`, `python-dotenv`, `lxml`
+- 依赖库: `rich`, `yfinance`, `akshare`, `openai`, `pandas`, `python-dotenv`, `lxml`, `requests`
 
 ## 安装
 
