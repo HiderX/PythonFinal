@@ -198,5 +198,3 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    # --- Market Tickers List Methods ---
-

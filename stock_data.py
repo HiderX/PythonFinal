@@ -112,7 +112,9 @@ class StockDataProvider:
                  if row.get('price', 0) != 0:
                      # Calculate change from price and percent
                      price = row.get('price', 0)
-                     cp = row.get('change_percent', 0)
+                     cp = row.get('change_percent')
+                     if cp is None:
+                         cp = 0
                      change = 0
                      if price != 0:
                          # price = prev * (1 + cp/100) => prev = price / (1 + cp/100)
@@ -219,16 +221,28 @@ class StockDataProvider:
             row = market_caches.get(m, {}).get(sym)
             
             if row and row.get('price', 0) != 0:
+                # Calculate change safely
+                price = row.get('price', 0)
+                cp = row.get('change_percent')
+                if cp is None:
+                    cp = 0
+                
+                change = 0
+                if price != 0:
+                    try:
+                        prev = price / (1 + cp/100)
+                        change = price - prev
+                    except:
+                        change = 0
+
                 results.append({
                     "symbol": row['symbol'],
                     "market": row['market'],
                     "name": row['name'],
-                    "price": row['price'],
-                     # Cached list might not have volume/change, assume 0 or stored
-                    "price": row['price'],
-                     # Calculate change
-                    "change": row['price'] - (row['price'] / (1 + row.get('change_percent', 0)/100)) if row.get('price', 0) != 0 else 0,
-                    "change_percent": row.get('change_percent', 0),
+                    "price": price,
+                    # Cached list might not have volume/change, assume 0 or stored
+                    "change": change,
+                    "change_percent": cp,
                     "volume": row.get('volume', 0)
                 })
             else:
@@ -427,11 +441,17 @@ class StockDataProvider:
                             
                             # Clean invalid data
                             try:
-                                price = float(price)
+                                if pd.isna(price):
+                                    price = float(row.get('昨收', 0))
+                                else:
+                                    price = float(price)
                             except: price = 0
                             
                             try:
-                                change_percent = float(change_percent)
+                                if pd.isna(change_percent):
+                                    change_percent = 0
+                                else:
+                                    change_percent = float(change_percent)
                             except: change_percent = 0
                                 
                             try:
@@ -440,7 +460,9 @@ class StockDataProvider:
 
                             yf_suffix = ""
                             if code.startswith('6'): yf_suffix = ".SS"
-                            elif code.startswith('9'): yf_suffix = ".SS" 
+                            elif code.startswith('9') and len(code) == 6 and code[1] == '0': yf_suffix = ".SS" # 900xxx B-shares?
+                            # 920 is Beijing
+                            elif code.startswith('9') and code.startswith('92'): yf_suffix = ".BJ"
                             elif code.startswith('0') or code.startswith('3'): yf_suffix = ".SZ"
                             elif code.startswith('8') or code.startswith('4'): yf_suffix = ".BJ"
                             
